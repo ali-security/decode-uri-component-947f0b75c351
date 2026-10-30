@@ -80,6 +80,15 @@ function decode(input) {
 
 			// Continuation byte or invalid lead byte — emit one `%XX` literally.
 			if (sequenceLength === 0) {
+				var pair = input.slice(position, position + 6);
+
+				// UTF-16 BOM byte pairs become two replacement characters.
+				if (pair === '%FE%FF' || pair === '%FF%FE') {
+					output += '\uFFFD\uFFFD';
+					position += 6;
+					continue;
+				}
+
 				output += input.slice(position, position + 3);
 				position += 3;
 				continue;
@@ -112,7 +121,10 @@ function decode(input) {
 			}
 
 			// Missing continuation bytes or decode failure — emit the first byte literally.
-			output += input.slice(position, position + 3);
+			var literal = input.slice(position, position + 3);
+
+			// A truncated `%C2` becomes a replacement character.
+			output += literal === '%C2' ? '\uFFFD' : literal;
 			position += 3;
 		}
 
@@ -121,42 +133,10 @@ function decode(input) {
 }
 
 function customDecodeURIComponent(input) {
-	// Keep track of all the replacements and prefill the map with the `BOM`
-	var replaceMap = {
-		'%FE%FF': '\uFFFD\uFFFD',
-		'%FF%FE': '\uFFFD\uFFFD'
-	};
-
-	// Find percent-encoded runs separated by literal text or lone `%` characters.
-	var match = multiMatcher.exec(input);
-
-	while (match) {
-		try {
-			// Decode as big chunks as possible
-			replaceMap[match[0]] = decodeURIComponent(match[0]);
-		} catch (err) {
-			var result = decode(match[0]);
-
-			if (result !== match[0]) {
-				replaceMap[match[0]] = result;
-			}
-		}
-
-		match = multiMatcher.exec(input);
-	}
-
-	// Add `%C2` at the end of the map to make sure it does not replace the combinator before everything else
-	replaceMap['%C2'] = '\uFFFD';
-
-	var entries = Object.keys(replaceMap);
-
-	for (var i = 0; i < entries.length; i++) {
-		// Replace all decoded components
-		var key = entries[i];
-		input = input.replace(new RegExp(key, 'g'), replaceMap[key]);
-	}
-
-	return input;
+	// Decode each percent-encoded run in place in a single pass. Decoded output is never rescanned.
+	return input.replace(multiMatcher, function (run) {
+		return decode(run);
+	});
 }
 
 module.exports = function (encodedURI) {

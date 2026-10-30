@@ -179,12 +179,16 @@ const mixedSequenceTests = {
 // UTF-16 BOM sequences embedded in larger strings.
 const bomContextTests = {
 	'a%FE%FFb': 'a' + replacementChar + replacementChar + 'b',
-	'%FE%FF%FE%FF': replacementChar + replacementChar + replacementChar + replacementChar
+	'%FE%FF%FE%FF': replacementChar + replacementChar + replacementChar + replacementChar,
+	'%41%FE%FF': 'A' + replacementChar + replacementChar
 };
 
 // Single-pass decoding (one level per call, not recursive).
 const doubleEncodingTests = {
-	'%252525': '%2525'
+	'%252525': '%2525',
+	// Malformed tail forces the fallback decoder; decoded output must not be decoded again.
+	'%25C2%zz': '%C2%zz',
+	'%25%41%zz': '%A%zz'
 };
 
 // Additional edge cases.
@@ -244,6 +248,28 @@ Object.keys(invalidTypes).forEach(title => {
 test('decodes one level per call', t => {
 	t.is(m('%2525'), '%25');
 	t.is(m('%25'), '%');
+});
+
+function toHexByte(value) {
+	return ('0' + value.toString(16)).slice(-2);
+}
+
+test('many distinct percent-encoded runs decode in linear time', t => {
+	let input = '';
+
+	for (let index = 0; index < 32000; index++) {
+		const high = toHexByte(Math.floor(index / 256));
+		const low = toHexByte(index % 256);
+		input += '%' + high + '%' + low + 'x';
+	}
+
+	input += '%zz';
+
+	const start = Date.now();
+	m(input);
+
+	// Linear decoding takes tens of milliseconds; the old quadratic replace loop took ~20s.
+	t.true(Date.now() - start < 1000);
 });
 
 test('idempotent when no percent-encoding remains', t => {
