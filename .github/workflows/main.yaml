@@ -1,11 +1,16 @@
 name: CI
 on:
-  - push
-  - pull_request
+  workflow_dispatch:
+    inputs:
+      test-filter:
+        description: 'Optional ava test-file selector; empty runs the full suite'
+        required: false
+        default: ''
 jobs:
   test:
     name: Node.js ${{ matrix.node-version }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -23,5 +28,30 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: ${{ matrix.node-version }}
+      - name: Pin registry to release date
+        run: |
+          npm config set registry https://time-machines-npm.sealsecurity.io/
+          npm config set //time-machines-npm.sealsecurity.io/:_authToken=2022-12-01T18:22:59.105000Z
       - run: npm install
-      - run: npm test
+      - name: Test
+        run: |
+          if [ -n "${{ inputs.test-filter }}" ]; then
+            ./node_modules/.bin/nyc ./node_modules/.bin/ava --tap ${{ inputs.test-filter }}
+          else
+            ./node_modules/.bin/nyc ./node_modules/.bin/ava --tap
+          fi
+  pack:
+    name: Pack tarball
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '16.14.2'
+      - run: npm pack
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-tarball
+          path: '*.tgz'
+          if-no-files-found: error
